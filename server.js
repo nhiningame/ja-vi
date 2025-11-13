@@ -5,51 +5,53 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 dotenv.config();
-const app = express();
-const PORT = process.env.PORT || 3000;
 
-// Cấu hình đường dẫn tĩnh cho index.html
+const app = express();
+app.use(express.json());
+
+// ✅ Cấu hình để phục vụ file tĩnh (index.html, CSS, JS...)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.use(express.static(__dirname));
 
-// Cho phép nhận JSON
-app.use(express.json());
+// ✅ Route trang chủ
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
 
-// API dịch bằng Gemini
+// ✅ Route API dịch
 app.post("/api/translate", async (req, res) => {
+  const { text } = req.body;
+
   try {
-    const { text, source, target } = req.body;
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "Thiếu GEMINI_API_KEY" });
-
-    // Prompt yêu cầu Gemini dịch
-    const prompt = `Dịch đoạn sau từ tiếng Nhật sang tiếng Việt, không thêm lời giải thích:
-${text}`;
-
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + apiKey,
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" +
+        process.env.GEMINI_API_KEY,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
+          contents: [
+            {
+              parts: [
+                {
+                  text: `Dịch chính xác từ tiếng Nhật sang tiếng Việt, chỉ trả về nghĩa: ${text}`,
+                },
+              ],
+            },
+          ],
         }),
       }
     );
 
     const data = await response.json();
-
-    const translation =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-
-    res.json({ translation });
+    const translated =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text || "Không có kết quả";
+    res.json({ translated });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: "Lỗi khi gọi Gemini API" });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server đang chạy tại http://localhost:${PORT}`);
-});
+// ✅ Cho Vercel biết cổng (không cần lắng nghe port khi deploy)
+export default app;
