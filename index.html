@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Nghe tiếng Nhật → Dịch tiếng Việt (Gemini)</title>
+  <style>
+    html,body{
+      height:100%;margin:0;padding:0;
+      font-family:system-ui,Segoe UI,Roboto,Arial;
+      background:#f7f8fb;
+    }
+    .container{
+      display:flex;flex-direction:row;height:100vh;gap:2px;
+    }
+    .pane{
+      flex:1;display:flex;flex-direction:column;
+      background:white;box-shadow:inset 0 0 6px rgba(0,0,0,0.1);
+    }
+    h2{
+      background:#f0f0f0;margin:0;padding:14px;
+      font-size:36px;text-align:center;border-bottom:1px solid #ddd;
+    }
+    textarea{
+      flex:1;border:none;resize:none;padding:20px;
+      font-size:36px;line-height:1.6;
+      overflow-y:auto;height:100%;
+    }
+    .controls{
+      position:fixed;top:10px;left:50%;transform:translateX(-50%);
+      display:flex;gap:8px;z-index:1000;
+    }
+    button{
+      padding:14px 20px;border-radius:10px;border:1px solid #ccc;
+      background:#fff;cursor:pointer;font-size:24px;
+    }
+    .status{
+      position:fixed;bottom:10px;left:50%;transform:translateX(-50%);
+      font-size:24px;color:#555;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button id="startBtn">Bắt đầu nghe</button>
+    <button id="stopBtn" disabled>Dừng</button>
+    <button id="clearBtn">Xóa nội dung</button>
+  </div>
+  <div class="container">
+    <div class="pane">
+      <h2>Tiếng Nhật</h2>
+      <textarea id="japanese" readonly rows="9"></textarea>
+    </div>
+    <div class="pane">
+      <h2>Tiếng Việt</h2>
+      <textarea id="vietnamese" readonly rows="9"></textarea>
+    </div>
+  </div>
+  <div class="status" id="status">Trạng thái: chờ</div>
+
+<script>
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const clearBtn = document.getElementById('clearBtn');
+const statusEl = document.getElementById('status');
+const jpEl = document.getElementById('japanese');
+const viEl = document.getElementById('vietnamese');
+
+let recognition = null;
+let isListening = false;
+
+function supportsSpeech() {
+  return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+
+if (!supportsSpeech()) {
+  statusEl.textContent = 'Trình duyệt không hỗ trợ Web Speech API.';
+  startBtn.disabled = true;
+}
+
+function createRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const r = new SR();
+  r.lang = 'ja-JP';
+  r.interimResults = true;
+  r.continuous = true;
+
+  r.onstart = () => {
+    isListening = true;
+    statusEl.textContent = 'Đang nghe...';
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+  };
+
+  r.onend = () => {
+    if (isListening) {
+      // Tự động khởi động lại nếu đang ở chế độ nghe
+      r.start();
+    } else {
+      statusEl.textContent = 'Đã dừng';
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+  };
+
+  r.onerror = (e) => {
+    statusEl.textContent = 'Lỗi nhận diện: ' + (e.error || e.message);
+    if (isListening && e.error !== 'no-speech') {
+      r.stop();
+      setTimeout(() => r.start(), 1000);
+    }
+  };
+
+  r.onresult = (ev) => {
+    let interim = '';
+    for (let i = ev.resultIndex; i < ev.results.length; ++i) {
+      const res = ev.results[i];
+      if (res.isFinal) {
+        const text = res[0].transcript.trim();
+        jpEl.value += (jpEl.value ? '\n' : '') + text;
+        keepNineLines(jpEl);
+        translateText(text);
+      } else {
+        interim += res[0].transcript;
+      }
+    }
+    if (interim) statusEl.textContent = 'Nghe: ' + interim;
+  };
+
+  return r;
+}
+
+function keepNineLines(el) {
+  const lines = el.value.split('\n');
+  if (lines.length > 9) {
+    el.value = lines.slice(lines.length - 9).join('\n');
+  }
+  el.scrollTop = el.scrollHeight;
+}
+
+startBtn.addEventListener('click', () => {
+  if (!recognition) recognition = createRecognition();
+  isListening = true;
+  try {
+    recognition.start();
+  } catch (e) {
+    recognition = createRecognition();
+    recognition.start();
+  }
+});
+
+stopBtn.addEventListener('click', () => {
+  isListening = false;
+  if (recognition) recognition.stop();
+});
+
+clearBtn.addEventListener('click', () => {
+  jpEl.value = '';
+  viEl.value = '';
+  statusEl.textContent = 'Đã xóa nội dung';
+});
+
+async function translateText(txt) {
+  statusEl.textContent = 'Đang dịch...';
+  try {
+    const resp = await fetch('/api/translate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ text: txt, source: 'ja', target: 'vi' })
+    });
+    const data = await resp.json();
+    viEl.value += (viEl.value ? '\n' : '') + (data.translation || '[Không có kết quả]');
+    keepNineLines(viEl);
+    statusEl.textContent = 'Đang nghe...';
+  } catch (e) {
+    statusEl.textContent = 'Lỗi kết nối server';
+  }
+}
+</script>
+</body>
+</html>
